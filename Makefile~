@@ -1,0 +1,7 @@
+all: record
+
+record: record.cpp
+	g++ record.cpp -o record -I/opt/ros/noetic/include -L/opt/ros/noetic/lib/ -lroscpp -lrostime -lrosconsole -lroscpp_serialization -luring
+
+clean
+	rm record
