@@ -8,6 +8,8 @@
 
 io_uring ring;
 int output_fd = -1;
+std::atomic<long long> total_duration(0); // Total duration in nano seconds
+std::atomic<int> callback_count(0); // Number of callbacks
 
 bool setup_io_uring() {
     if (io_uring_queue_init(32, &ring, 0) < 0) {
@@ -62,6 +64,7 @@ void write_to_file(const std::string& data) {
 }
 
 void messageCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+    auto start = std::chrono::high_resolution_clock::now();
     std::stringstream ss;
     ss << "Header: " << msg->header.stamp << " Frame ID: " << msg->header.frame_id << "\n";
     ss << "Position: ("
@@ -75,6 +78,11 @@ void messageCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
        << msg->pose.orientation.w << ")\n";
 
     write_to_file(ss.str());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::nano> duration = end - start;
+    total_duration += (long)duration.count();
+    callback_count++;
 }
 
 
@@ -98,6 +106,11 @@ int main(int argc, char **argv) {
     ros::AsyncSpinner spinner(1); // Use 1 thread
     spinner.start();
     ros::waitForShutdown();
+
+    if (callback_count > 0) {
+        double average_duration = static_cast<double>(total_duration.load()) / callback_count.load();
+        std::cout << "Average callback duration: " << average_duration << " ns" << std::endl;
+    }
 
     std::cout << "Exiting..." << std::endl;
 
