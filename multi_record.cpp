@@ -1,4 +1,3 @@
-#include <fcntl.h>
 #include <unistd.h>
 #include <liburing.h>
 #include <string>
@@ -6,16 +5,17 @@
 #include <sstream>
 #include <chrono>
 #include <atomic>
+#include <vector>
 #include "ros/ros.h"
-#include "geometry_msgs/PoseStamped.h"
+#include "std_msgs/String.h"
 
-std::array<int, 48> output_fds;
+std::array<int, 1> output_fds;
 io_uring ring;
 std::atomic<long long> total_duration(0);
 std::atomic<int> callback_count(0);
 
 bool setup_io_uring() {
-    if (io_uring_queue_init(256, &ring, 0) < 0) {
+    if (io_uring_queue_init(1024, &ring, 0) < 0) {
         ROS_ERROR("Failed to initialize io_uring");
         return false;
     }
@@ -23,13 +23,11 @@ bool setup_io_uring() {
 }
 
 bool open_output_files() {
-    for (int i = 0; i < output_fds.size(); ++i) {
-        std::string filename = "output" + std::to_string(i + 1) + ".txt";
-        output_fds[i] = open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (output_fds[i] < 0) {
-            ROS_ERROR("Failed to open file: %s", filename.c_str());
-            return false;
-        }
+    std::string filename = "output.txt";
+    output_fds[0] = open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (output_fds[0] < 0) {
+        ROS_ERROR("Failed to open file: %s", filename.c_str());
+        return false;
     }
     return true;
 }
@@ -69,17 +67,13 @@ void write_to_file(const std::string& data) {
     io_uring_submit(&ring);
 }
 
-void messageCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+void messageCallback(const std_msgs::String::ConstPtr& msg) {
     auto start = std::chrono::high_resolution_clock::now();
-    
-    std::stringstream ss;
-    ss << "Header: " << msg->header.stamp << " Frame ID: " << msg->header.frame_id << "\n";
-    ss << "Position: (" << msg->pose.position.x << ", " << msg->pose.position.y << ", " << msg->pose.position.z << ")\n";
-    ss << "Orientation: (" << msg->pose.orientation.x << ", " << msg->pose.orientation.y << ", " << msg->pose.orientation.z << ", " << msg->pose.orientation.w << ")\n";
 
-    for (int i = 0; i < 1; i++) {
-        write_to_file(ss.str());
-    }
+    std::stringstream ss;
+    ss << "Received message: " << msg->data << "\n";
+
+    write_to_file(ss.str());
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::nano> duration = end - start;
@@ -100,15 +94,24 @@ int main(int argc, char **argv) {
     }
 
     ros::NodeHandle n;
-    ros::Subscriber sub = n.subscribe("/vrpn_client_node/omega_truck/pose", 1000, messageCallback);
+    std::vector<ros::Subscriber> subscribers;
+    int num_topics = 36;
+
+    for (int i = 0; i < num_topics; ++i) {
+        std::stringstream topic_name;
+        topic_name << "/topic_" << i;
+
+        subscribers.push_back(n.subscribe(topic_name.str(), 1000, messageCallback));
+    }
 
     ros::AsyncSpinner spinner(1);
     spinner.start();
     ros::waitForShutdown();
 
+
     if (callback_count > 0) {
         double average_duration = static_cast<double>(total_duration.load()) / callback_count.load();
-        std::cout << "Average callback duration: " << average_duration << " ns" << std::endl;
+        std::cout << "Average callback duration: " << average_duration << " ns" << " count " << callback_count.load() << std::endl;
     }
 
     cleanup_io_uring();
